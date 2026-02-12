@@ -78,37 +78,37 @@ export default function MetricsPanel({ account, refreshTrigger }: MetricsPanelPr
   const metricCards = [
     {
       label: 'Win Rate',
-      value: `${(metrics.win_rate * 100).toFixed(1)}%`,
+      value: `${((metrics.win_rate || 0) * 100).toFixed(1)}%`,
       icon: Target,
-      color: metrics.win_rate >= 0.5 ? 'text-profit' : 'text-loss'
+      color: (metrics.win_rate || 0) >= 0.5 ? 'text-profit' : 'text-loss'
     },
     {
       label: 'Net P&L',
-      value: `$${metrics.net_pnl.toFixed(2)}`,
+      value: `$${(metrics.net_pnl || 0).toFixed(2)}`,
       icon: DollarSign,
-      color: metrics.net_pnl >= 0 ? 'text-profit' : 'text-loss'
+      color: (metrics.net_pnl || 0) >= 0 ? 'text-profit' : 'text-loss'
     },
     {
       label: 'Profit Factor',
-      value: metrics.profit_factor.toFixed(2),
+      value: (metrics.profit_factor || 0).toFixed(2),
       icon: TrendingUp,
-      color: metrics.profit_factor >= 1.5 ? 'text-profit' : 'text-yellow-500'
+      color: (metrics.profit_factor || 0) >= 1.5 ? 'text-profit' : 'text-yellow-500'
     },
     {
       label: 'Total Trades',
-      value: metrics.total_trades.toString(),
+      value: (metrics.total_trades || 0).toString(),
       icon: Award,
       color: 'text-blue-400'
     },
     {
       label: 'Avg Win',
-      value: `$${metrics.average_win.toFixed(2)}`,
+      value: `$${(metrics.average_win || 0).toFixed(2)}`,
       icon: TrendingUp,
       color: 'text-profit'
     },
     {
       label: 'Avg Loss',
-      value: `$${Math.abs(metrics.average_loss).toFixed(2)}`,
+      value: `$${Math.abs(metrics.average_loss || 0).toFixed(2)}`,
       icon: TrendingDown,
       color: 'text-loss'
     }
@@ -139,19 +139,19 @@ export default function MetricsPanel({ account, refreshTrigger }: MetricsPanelPr
         <div className="mt-4 pt-4 border-t border-gray-700 grid grid-cols-2 gap-3 text-sm">
           <div>
             <span className="text-gray-400">Wins:</span>
-            <span className="text-profit ml-2 font-semibold">{metrics.winning_trades}</span>
+            <span className="text-profit ml-2 font-semibold">{metrics.winning_trades || 0}</span>
           </div>
           <div>
             <span className="text-gray-400">Losses:</span>
-            <span className="text-loss ml-2 font-semibold">{metrics.losing_trades}</span>
+            <span className="text-loss ml-2 font-semibold">{metrics.losing_trades || 0}</span>
           </div>
           <div>
             <span className="text-gray-400">Best Win:</span>
-            <span className="text-profit ml-2 font-semibold">${metrics.largest_win.toFixed(2)}</span>
+            <span className="text-profit ml-2 font-semibold">${(metrics.largest_win || 0).toFixed(2)}</span>
           </div>
           <div>
             <span className="text-gray-400">Worst Loss:</span>
-            <span className="text-loss ml-2 font-semibold">${Math.abs(metrics.largest_loss).toFixed(2)}</span>
+            <span className="text-loss ml-2 font-semibold">${Math.abs(metrics.largest_loss || 0).toFixed(2)}</span>
           </div>
         </div>
       </div>
