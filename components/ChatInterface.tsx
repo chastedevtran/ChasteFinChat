@@ -128,7 +128,12 @@ export default function ChatInterface({ account, onTradesUpdated }: ChatInterfac
                   : 'bg-gray-700 text-gray-100'
               }`}
             >
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              <p className="whitespace-pre-wrap" dangerouslySetInnerHTML={{
+                __html: message.content.replace(
+                  /(https?:\/\/[^\s]+)/g,
+                  '<a href="$1" target="_blank" rel="noopener noreferrer" class="underline text-blue-300 hover:text-blue-200">$1</a>'
+                )
+              }}></p>
               {message.toolCalls && message.toolCalls.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-gray-600 text-xs text-gray-400">
                   Used tools: {message.toolCalls.map(t => t.name).join(', ')}
