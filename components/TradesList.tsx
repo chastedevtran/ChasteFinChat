@@ -32,27 +32,38 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
   }, [account, refreshTrigger])
 
   const fetchTrades = async () => {
-    setLoading(true)
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tool: 'query_trades',
-          arguments: { account, limit: 100 }
-        })
-      })
+  setLoading(true)
+  try {
+    // Get trades from last 30 days
+    const endDate = new Date().toISOString().split('T')[0]  // Today: 2026-02-13
+    const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split('T')[0]  // 30 days ago
 
-      const data = await response.json()
-      if (data.result?.trades) {
-        setTrades(data.result.trades)
-      }
-    } catch (error) {
-      console.error('Error fetching trades:', error)
-    } finally {
-      setLoading(false)
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tool: 'query_trades',
+        arguments: { 
+          account, 
+          start_date: startDate,  // ← ADD THIS
+          end_date: endDate,      // ← ADD THIS
+          limit: 100 
+        }
+      })
+    })
+
+    const data = await response.json()
+    if (data.result?.trades) {
+      setTrades(data.result.trades)
     }
+  } catch (error) {
+    console.error('Error fetching trades:', error)
+  } finally {
+    setLoading(false)
   }
+}
 
   const handleExportCSV = async () => {
     try {
