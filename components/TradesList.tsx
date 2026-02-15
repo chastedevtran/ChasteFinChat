@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Download, Filter, ArrowUpDown } from 'lucide-react'
+import { Download, Filter, ArrowUpDown, X, Calendar, DollarSign, TrendingUp } from 'lucide-react'
 
 interface TradesListProps {
   account: string
@@ -20,26 +20,98 @@ interface Trade {
   indicators?: any
 }
 
+interface Filters {
+  dateRange: 'all' | 'today' | 'week' | 'month' | 'custom'
+  customStartDate: string
+  customEndDate: string
+  profitFilter: 'all' | 'wins' | 'losses'
+  action: 'all' | 'buy' | 'sell'
+  minProfit: string
+  maxProfit: string
+  ticker: string
+}
+
 export default function TradesList({ account, refreshTrigger }: TradesListProps) {
   const [trades, setTrades] = useState<Trade[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'wins' | 'losses'>('all')
+  const [showFilters, setShowFilters] = useState(false)
   const [sortBy, setSortBy] = useState<'date' | 'profit'>('date')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  
+  const [filters, setFilters] = useState<Filters>({
+    dateRange: 'month',
+    customStartDate: '',
+    customEndDate: '',
+    profitFilter: 'all',
+    action: 'all',
+    minProfit: '',
+    maxProfit: '',
+    ticker: ''
+  })
 
   useEffect(() => {
     fetchTrades()
   }, [account, refreshTrigger])
 
+  const getDateRange = () => {
+    const now = new Date()
+    const endDate = now.toISOString().split('T')[0]
+    let startDate = ''
+
+    switch (filters.dateRange) {
+      case 'today':
+        startDate = endDate
+        break
+      case 'week':
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        startDate = weekAgo.toISOString().split('T')[0]
+        break
+      case 'month':
+        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+        startDate = monthAgo.toISOString().split('T')[0]
+        break
+      case 'custom':
+        return {
+          start_date: filters.customStartDate,
+          end_date: filters.customEndDate
+        }
+      case 'all':
+      default:
+        return {}
+    }
+
+    return { start_date: startDate, end_date: endDate }
+  }
+
   const fetchTrades = async () => {
     setLoading(true)
     try {
+      const dateRange = getDateRange()
+      const queryArgs: any = { 
+        account, 
+        limit: 1000,
+        ...dateRange
+      }
+
+      // Add filters
+      if (filters.action !== 'all') {
+        queryArgs.action = filters.action.toUpperCase()
+      }
+
+      if (filters.minProfit) {
+        queryArgs.min_profit = parseFloat(filters.minProfit)
+      }
+
+      if (filters.maxProfit) {
+        queryArgs.max_profit = parseFloat(filters.maxProfit)
+      }
+
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tool: 'query_trades',
-          arguments: { account, limit: 100 }
+          arguments: queryArgs
         })
       })
 
@@ -54,20 +126,37 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
     }
   }
 
+  const handleApplyFilters = () => {
+    fetchTrades()
+  }
+
+  const handleResetFilters = () => {
+    setFilters({
+      dateRange: 'month',
+      customStartDate: '',
+      customEndDate: '',
+      profitFilter: 'all',
+      action: 'all',
+      minProfit: '',
+      maxProfit: '',
+      ticker: ''
+    })
+  }
+
   const handleExportCSV = async () => {
     try {
+      const dateRange = getDateRange()
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tool: 'export_csv',
-          arguments: { account }
+          arguments: { account, ...dateRange }
         })
       })
 
       const data = await response.json()
       if (data.result?.s3_key) {
-        // Get download URL
         const urlResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/execute`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -78,8 +167,8 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
         })
 
         const urlData = await urlResponse.json()
-        if (urlData.result?.url) {
-          window.open(urlData.result.url, '_blank')
+        if (urlData.result?.download_url) {
+          window.open(urlData.result.download_url, '_blank')
         }
       }
     } catch (error) {
@@ -89,8 +178,16 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
 
   const filteredTrades = trades.filter(trade => {
     const profit = parseFloat(trade.profit)
-    if (filter === 'wins') return profit > 0
-    if (filter === 'losses') return profit < 0
+    
+    // Profit filter
+    if (filters.profitFilter === 'wins' && profit <= 0) return false
+    if (filters.profitFilter === 'losses' && profit >= 0) return false
+    
+    // Ticker filter
+    if (filters.ticker && !trade.ticker.toLowerCase().includes(filters.ticker.toLowerCase())) {
+      return false
+    }
+    
     return true
   })
 
@@ -103,6 +200,12 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
       return sortOrder === 'asc' ? comparison : -comparison
     }
   })
+
+  // Calculate stats
+  const totalProfit = filteredTrades.reduce((sum, t) => sum + parseFloat(t.profit), 0)
+  const winningTrades = filteredTrades.filter(t => parseFloat(t.profit) > 0).length
+  const losingTrades = filteredTrades.filter(t => parseFloat(t.profit) < 0).length
+  const winRate = filteredTrades.length > 0 ? (winningTrades / filteredTrades.length * 100) : 0
 
   if (loading) {
     return (
@@ -121,59 +224,202 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
       <div className="p-6 border-b border-gray-700">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-white">Trade History</h2>
-          <button
-            onClick={handleExportCSV}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-          >
-            <Download className="h-4 w-4" />
-            Export CSV
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                showFilters ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              <Filter className="h-4 w-4" />
+              Filters
+            </button>
+            <button
+              onClick={handleExportCSV}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+            >
+              <Download className="h-4 w-4" />
+              Export
+            </button>
+          </div>
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap gap-4">
-          <div className="flex gap-2">
-            <button
-              onClick={() => setFilter('all')}
-              className={`px-3 py-1 rounded ${
-                filter === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'
-              }`}
-            >
-              All
-            </button>
-            <button
-              onClick={() => setFilter('wins')}
-              className={`px-3 py-1 rounded ${
-                filter === 'wins' ? 'bg-profit text-white' : 'bg-gray-700 text-gray-300'
-              }`}
-            >
-              Wins
-            </button>
-            <button
-              onClick={() => setFilter('losses')}
-              className={`px-3 py-1 rounded ${
-                filter === 'losses' ? 'bg-loss text-white' : 'bg-gray-700 text-gray-300'
-              }`}
-            >
-              Losses
-            </button>
+        {/* Stats Bar */}
+        <div className="grid grid-cols-4 gap-4 mb-4">
+          <div className="bg-gray-700/50 rounded-lg p-3">
+            <div className="text-xs text-gray-400">Total Trades</div>
+            <div className="text-lg font-semibold text-white">{filteredTrades.length}</div>
           </div>
+          <div className="bg-gray-700/50 rounded-lg p-3">
+            <div className="text-xs text-gray-400">Win Rate</div>
+            <div className="text-lg font-semibold text-profit">{winRate.toFixed(1)}%</div>
+          </div>
+          <div className="bg-gray-700/50 rounded-lg p-3">
+            <div className="text-xs text-gray-400">Total P&L</div>
+            <div className={`text-lg font-semibold ${totalProfit >= 0 ? 'text-profit' : 'text-loss'}`}>
+              ${totalProfit.toFixed(2)}
+            </div>
+          </div>
+          <div className="bg-gray-700/50 rounded-lg p-3">
+            <div className="text-xs text-gray-400">W/L Ratio</div>
+            <div className="text-lg font-semibold text-white">{winningTrades}/{losingTrades}</div>
+          </div>
+        </div>
 
-          <div className="flex gap-2">
-            <button
-              onClick={() => setSortBy(sortBy === 'date' ? 'profit' : 'date')}
-              className="flex items-center gap-1 px-3 py-1 bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
-            >
-              <ArrowUpDown className="h-4 w-4" />
-              Sort by {sortBy === 'date' ? 'Date' : 'Profit'}
-            </button>
-            <button
-              onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-              className="px-3 py-1 bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
-            >
-              {sortOrder === 'asc' ? '↑' : '↓'}
-            </button>
+        {/* Advanced Filters Panel */}
+        {showFilters && (
+          <div className="bg-gray-700/30 rounded-lg p-4 mb-4 space-y-4">
+            {/* Date Range */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                <Calendar className="inline h-4 w-4 mr-1" />
+                Date Range
+              </label>
+              <div className="flex gap-2 mb-2">
+                {(['all', 'today', 'week', 'month', 'custom'] as const).map((range) => (
+                  <button
+                    key={range}
+                    onClick={() => setFilters({ ...filters, dateRange: range })}
+                    className={`px-3 py-1 rounded text-sm ${
+                      filters.dateRange === range
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    {range.charAt(0).toUpperCase() + range.slice(1)}
+                  </button>
+                ))}
+              </div>
+              {filters.dateRange === 'custom' && (
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={filters.customStartDate}
+                    onChange={(e) => setFilters({ ...filters, customStartDate: e.target.value })}
+                    className="bg-gray-700 text-white px-3 py-2 rounded"
+                  />
+                  <span className="text-gray-400 self-center">to</span>
+                  <input
+                    type="date"
+                    value={filters.customEndDate}
+                    onChange={(e) => setFilters({ ...filters, customEndDate: e.target.value })}
+                    className="bg-gray-700 text-white px-3 py-2 rounded"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* Action Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Action</label>
+                <select
+                  value={filters.action}
+                  onChange={(e) => setFilters({ ...filters, action: e.target.value as any })}
+                  className="w-full bg-gray-700 text-white px-3 py-2 rounded"
+                >
+                  <option value="all">All</option>
+                  <option value="buy">Buy Only</option>
+                  <option value="sell">Sell Only</option>
+                </select>
+              </div>
+
+              {/* Profit Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Result</label>
+                <select
+                  value={filters.profitFilter}
+                  onChange={(e) => setFilters({ ...filters, profitFilter: e.target.value as any })}
+                  className="w-full bg-gray-700 text-white px-3 py-2 rounded"
+                >
+                  <option value="all">All</option>
+                  <option value="wins">Winners Only</option>
+                  <option value="losses">Losers Only</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* Min Profit */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  <DollarSign className="inline h-4 w-4 mr-1" />
+                  Min Profit
+                </label>
+                <input
+                  type="number"
+                  value={filters.minProfit}
+                  onChange={(e) => setFilters({ ...filters, minProfit: e.target.value })}
+                  placeholder="e.g., -100"
+                  className="w-full bg-gray-700 text-white px-3 py-2 rounded"
+                />
+              </div>
+
+              {/* Max Profit */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  <DollarSign className="inline h-4 w-4 mr-1" />
+                  Max Profit
+                </label>
+                <input
+                  type="number"
+                  value={filters.maxProfit}
+                  onChange={(e) => setFilters({ ...filters, maxProfit: e.target.value })}
+                  placeholder="e.g., 500"
+                  className="w-full bg-gray-700 text-white px-3 py-2 rounded"
+                />
+              </div>
+            </div>
+
+            {/* Ticker Search */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                <TrendingUp className="inline h-4 w-4 mr-1" />
+                Search Ticker
+              </label>
+              <input
+                type="text"
+                value={filters.ticker}
+                onChange={(e) => setFilters({ ...filters, ticker: e.target.value })}
+                placeholder="e.g., NQH2026"
+                className="w-full bg-gray-700 text-white px-3 py-2 rounded"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={handleApplyFilters}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+              >
+                Apply Filters
+              </button>
+              <button
+                onClick={handleResetFilters}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors"
+              >
+                <X className="h-4 w-4" />
+                Reset
+              </button>
+            </div>
           </div>
+        )}
+
+        {/* Quick Filters & Sort */}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setSortBy(sortBy === 'date' ? 'profit' : 'date')}
+            className="flex items-center gap-1 px-3 py-1 bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
+          >
+            <ArrowUpDown className="h-4 w-4" />
+            Sort: {sortBy === 'date' ? 'Date' : 'Profit'}
+          </button>
+          <button
+            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+            className="px-3 py-1 bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
+          >
+            {sortOrder === 'asc' ? '↑ Ascending' : '↓ Descending'}
+          </button>
         </div>
       </div>
 
