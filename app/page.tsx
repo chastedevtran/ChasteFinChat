@@ -1,27 +1,39 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import ChatInterface from '@/components/ChatInterface'
 import PerformanceCharts from '@/components/PerformanceCharts'
 import TradeHeatmap from '@/components/TradeHeatmap'
 import FileUpload from '@/components/FileUpload'
 import MetricsPanel from '@/components/MetricsPanel'
 import TradesList from '@/components/TradesList'
-import { BarChart3, MessageSquare, Upload, TrendingUp } from 'lucide-react'
+import IntegrationsPanel from '@/components/IntegrationsPanel'
+import QuickActions from '@/components/QuickActions'
+import { BarChart3, MessageSquare, Upload, TrendingUp, Link2 } from 'lucide-react'
 
-type Tab = 'chat' | 'charts' | 'upload' | 'trades'
+type Tab = 'chat' | 'charts' | 'upload' | 'trades' | 'integrations'
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('chat')
   const [account] = useState('APEX1840700000144')
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const chatCommandRef = useRef<((cmd: string) => void) | null>(null)
 
   const triggerRefresh = () => setRefreshTrigger(prev => prev + 1)
+
+  const handleChatCommand = (command: string) => {
+    // Switch to chat tab and inject command
+    setActiveTab('chat')
+    if (chatCommandRef.current) {
+      chatCommandRef.current(command)
+    }
+  }
 
   const tabs = [
     { id: 'chat' as Tab, name: 'AI Chat', icon: MessageSquare },
     { id: 'charts' as Tab, name: 'Analytics', icon: TrendingUp },
     { id: 'trades' as Tab, name: 'Trades', icon: BarChart3 },
+    { id: 'integrations' as Tab, name: 'Integrations', icon: Link2 },
     { id: 'upload' as Tab, name: 'Upload', icon: Upload },
   ]
 
@@ -77,10 +89,19 @@ export default function Dashboard() {
         {activeTab === 'chat' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
-              <ChatInterface account={account} onTradesUpdated={triggerRefresh} />
+              <ChatInterface
+                account={account}
+                onTradesUpdated={triggerRefresh}
+                onCommandRef={(fn) => { chatCommandRef.current = fn }}
+              />
             </div>
-            <div>
+            <div className="space-y-6">
               <MetricsPanel account={account} refreshTrigger={refreshTrigger} />
+              <QuickActions
+                account={account}
+                onChatCommand={handleChatCommand}
+                variant="sidebar"
+              />
             </div>
           </div>
         )}
@@ -88,6 +109,21 @@ export default function Dashboard() {
         {activeTab === 'charts' && (
           <div className="space-y-6">
             <MetricsPanel account={account} refreshTrigger={refreshTrigger} />
+            {/* Inline quick export actions */}
+            <div className="bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700 p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-300">Quick Exports</span>
+                <button
+                  onClick={() => setActiveTab('integrations')}
+                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  View all integrations →
+                </button>
+              </div>
+              <div className="mt-3">
+                <QuickActions account={account} variant="inline" />
+              </div>
+            </div>
             <PerformanceCharts account={account} refreshTrigger={refreshTrigger} />
             <TradeHeatmap account={account} refreshTrigger={refreshTrigger} />
           </div>
@@ -95,6 +131,10 @@ export default function Dashboard() {
 
         {activeTab === 'trades' && (
           <TradesList account={account} refreshTrigger={refreshTrigger} />
+        )}
+
+        {activeTab === 'integrations' && (
+          <IntegrationsPanel account={account} refreshTrigger={refreshTrigger} />
         )}
 
         {activeTab === 'upload' && (

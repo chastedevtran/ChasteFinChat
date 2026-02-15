@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2 } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Send, Loader2, Zap } from 'lucide-react'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -12,9 +12,10 @@ interface Message {
 interface ChatInterfaceProps {
   account: string
   onTradesUpdated?: () => void
+  onCommandRef?: (fn: (command: string) => void) => void
 }
 
-export default function ChatInterface({ account, onTradesUpdated }: ChatInterfaceProps) {
+export default function ChatInterface({ account, onTradesUpdated, onCommandRef }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -28,11 +29,9 @@ export default function ChatInterface({ account, onTradesUpdated }: ChatInterfac
     scrollToBottom()
   }, [messages])
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim() || loading) return
+  const sendMessage = useCallback(async (userMessage: string) => {
+    if (!userMessage.trim() || loading) return
 
-    const userMessage = input.trim()
     setInput('')
     setMessages(prev => [...prev, { role: 'user', content: userMessage }])
     setLoading(true)
@@ -60,7 +59,7 @@ export default function ChatInterface({ account, onTradesUpdated }: ChatInterfac
         }])
 
         // Trigger refresh if trades were modified
-        if (data.tool_calls?.some((call: any) => 
+        if (data.tool_calls?.some((call: any) =>
           ['write_trade', 'write_trades_batch', 'update_trade'].includes(call.name)
         )) {
           onTradesUpdated?.()
@@ -80,13 +79,34 @@ export default function ChatInterface({ account, onTradesUpdated }: ChatInterfac
     } finally {
       setLoading(false)
     }
+  }, [messages, loading, account, onTradesUpdated])
+
+  // Expose the sendMessage function to parent via ref callback
+  useEffect(() => {
+    if (onCommandRef) {
+      onCommandRef((command: string) => {
+        setInput(command)
+        // Auto-submit after a brief delay so the user sees the command
+        setTimeout(() => {
+          sendMessage(command)
+        }, 150)
+      })
+    }
+  }, [onCommandRef, sendMessage])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim() || loading) return
+    sendMessage(input.trim())
   }
 
   const suggestions = [
     "Show my recent trades",
     "What's my win rate?",
-    "Find my best performing trades",
-    "Export all winning trades to CSV"
+    "Export winning trades to Google Drive",
+    "Push my dataset to QuantConnect",
+    "Create a Kaggle dataset from all trades",
+    "Export last week's data to CSV"
   ]
 
   return (
@@ -94,21 +114,26 @@ export default function ChatInterface({ account, onTradesUpdated }: ChatInterfac
       {/* Chat Header */}
       <div className="p-4 border-b border-gray-700">
         <h2 className="text-lg font-semibold text-white">AI Trading Assistant</h2>
-        <p className="text-sm text-gray-400 mt-1">Ask questions about your trading data</p>
+        <p className="text-sm text-gray-400 mt-1">Ask questions, run analytics, or trigger exports</p>
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
-          <div className="text-center py-12">
+          <div className="text-center py-8">
             <p className="text-gray-400 mb-6">Try asking:</p>
             <div className="grid grid-cols-1 gap-2 max-w-md mx-auto">
               {suggestions.map((suggestion, i) => (
                 <button
                   key={i}
                   onClick={() => setInput(suggestion)}
-                  className="text-sm text-left px-4 py-2 bg-gray-700/50 hover:bg-gray-700 rounded-lg text-gray-300 transition-colors"
+                  className="text-sm text-left px-4 py-2 bg-gray-700/50 hover:bg-gray-700 rounded-lg text-gray-300 transition-colors flex items-center gap-2"
                 >
+                  {suggestion.toLowerCase().includes('export') ||
+                   suggestion.toLowerCase().includes('push') ||
+                   suggestion.toLowerCase().includes('kaggle') ? (
+                    <Zap className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                  ) : null}
                   {suggestion}
                 </button>
               ))}
@@ -161,7 +186,7 @@ export default function ChatInterface({ account, onTradesUpdated }: ChatInterfac
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about your trades..."
+            placeholder="Ask about trades, trigger exports, run analytics..."
             className="flex-1 bg-gray-700 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             disabled={loading}
           />
