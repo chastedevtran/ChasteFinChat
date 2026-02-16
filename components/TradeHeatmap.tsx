@@ -2,6 +2,15 @@
 
 import { useState, useEffect } from 'react'
 
+// --- Timestamp utility ---
+function parseTimestamp(ts: string): number {
+  if (!ts) return 0
+  if (/^\d+$/.test(ts)) return parseInt(ts, 10)
+  const parsed = new Date(ts).getTime()
+  return isNaN(parsed) ? 0 : parsed
+}
+// --- End utility ---
+
 interface TradeHeatmapProps {
   account: string
   refreshTrigger?: number
@@ -52,11 +61,15 @@ export default function TradeHeatmap({ account, refreshTrigger }: TradeHeatmapPr
   }
 
   // Group trades by day of week and hour
+  // FIXED: Use parseTimestamp for correct date parsing of mixed formats
   const heatmapData: { [key: string]: { [key: string]: { profit: number; count: number } } } = {}
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   
   trades.forEach(trade => {
-    const date = new Date(parseInt(trade.timestamp))
+    const ms = parseTimestamp(trade.timestamp)
+    if (ms === 0) return
+    
+    const date = new Date(ms)
     const day = daysOfWeek[date.getDay()]
     const hour = date.getHours()
     
@@ -82,19 +95,6 @@ export default function TradeHeatmap({ account, refreshTrigger }: TradeHeatmapPr
       maxProfit = Math.max(maxProfit, avgProfit)
     })
   })
-
-  const getColor = (profit: number) => {
-    if (profit === 0) return 'bg-gray-700'
-    
-    const intensity = Math.abs(profit) / Math.max(Math.abs(minProfit), Math.abs(maxProfit))
-    const opacityLevel = Math.min(Math.max(intensity, 0.2), 1)
-    
-    if (profit > 0) {
-      return `bg-green-500 bg-opacity-${Math.round(opacityLevel * 100)}`
-    } else {
-      return `bg-red-500 bg-opacity-${Math.round(opacityLevel * 100)}`
-    }
-  }
 
   const hours = Array.from({ length: 24 }, (_, i) => i)
 

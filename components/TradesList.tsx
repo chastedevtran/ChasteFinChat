@@ -3,6 +3,21 @@
 import { useState, useEffect } from 'react'
 import { Download, Filter, ArrowUpDown, X, Calendar, DollarSign, TrendingUp } from 'lucide-react'
 
+// --- Timestamp utility (handles both Unix ms and ISO strings) ---
+function parseTimestamp(ts: string): number {
+  if (!ts) return 0
+  if (/^\d+$/.test(ts)) return parseInt(ts, 10)
+  const parsed = new Date(ts).getTime()
+  return isNaN(parsed) ? 0 : parsed
+}
+
+function formatTimestamp(ts: string): string {
+  const ms = parseTimestamp(ts)
+  if (ms === 0) return 'N/A'
+  return new Date(ms).toLocaleString()
+}
+// --- End utility ---
+
 interface TradesListProps {
   account: string
   refreshTrigger?: number
@@ -184,16 +199,17 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
     if (filters.profitFilter === 'losses' && profit >= 0) return false
     
     // Ticker filter
-    if (filters.ticker && !trade.ticker.toLowerCase().includes(filters.ticker.toLowerCase())) {
+    if (filters.ticker && trade.ticker && !trade.ticker.toLowerCase().includes(filters.ticker.toLowerCase())) {
       return false
     }
     
     return true
   })
 
+  // FIXED: Use parseTimestamp for correct sorting of mixed formats
   const sortedTrades = [...filteredTrades].sort((a, b) => {
     if (sortBy === 'date') {
-      const comparison = parseInt(a.timestamp) - parseInt(b.timestamp)
+      const comparison = parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp)
       return sortOrder === 'asc' ? comparison : -comparison
     } else {
       const comparison = parseFloat(a.profit) - parseFloat(b.profit)
@@ -457,11 +473,13 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
               return (
                 <tr key={trade.trade_id} className="hover:bg-gray-700/30">
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                    {new Date(parseInt(trade.timestamp)).toLocaleString()}
+                    {formatTimestamp(trade.timestamp)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      trade.action === 'buy' ? 'bg-blue-600 text-white' : 'bg-purple-600 text-white'
+                      trade.action === 'buy' || trade.action === 'long'
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-purple-600 text-white'
                     }`}>
                       {trade.action.toUpperCase()}
                     </span>

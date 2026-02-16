@@ -3,6 +3,15 @@
 import { useState, useEffect } from 'react'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 
+// --- Timestamp utility ---
+function parseTimestamp(ts: string): number {
+  if (!ts) return 0
+  if (/^\d+$/.test(ts)) return parseInt(ts, 10)
+  const parsed = new Date(ts).getTime()
+  return isNaN(parsed) ? 0 : parsed
+}
+// --- End utility ---
+
 interface PerformanceChartsProps {
   account: string
   refreshTrigger?: number
@@ -57,9 +66,9 @@ export default function PerformanceCharts({ account, refreshTrigger }: Performan
     )
   }
 
-  // Prepare cumulative P&L data
+  // FIXED: Use parseTimestamp for correct sorting of mixed formats
   const cumulativePnl = trades
-    .sort((a, b) => parseInt(a.timestamp) - parseInt(b.timestamp))
+    .sort((a, b) => parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp))
     .reduce((acc: any[], trade, i) => {
       const profit = parseFloat(trade.profit)
       const cumulative = i === 0 ? profit : acc[i - 1].cumulative + profit
@@ -67,7 +76,7 @@ export default function PerformanceCharts({ account, refreshTrigger }: Performan
         index: i + 1,
         cumulative: parseFloat(cumulative.toFixed(2)),
         profit: parseFloat(profit.toFixed(2)),
-        date: new Date(parseInt(trade.timestamp)).toLocaleDateString()
+        date: new Date(parseTimestamp(trade.timestamp)).toLocaleDateString()
       }]
     }, [])
 
