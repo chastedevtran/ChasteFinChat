@@ -11,15 +11,21 @@ interface TradesListProps {
 interface Trade {
   trade_id: string
   timestamp: string
+  entry_time?: string
+  closed_at?: string
   action: string
   ticker: string
+  symbol?: string
   entry_price: string
   exit_price: string
   quantity: string
   profit: string
+  result?: number
   signal_type?: string
   status?: string
   exit_reason?: string
+  dollar_tp?: string
+  dollar_sl?: string
   indicators?: any
 }
 
@@ -31,38 +37,86 @@ interface Filters {
   action: 'all' | 'buy' | 'sell' | 'long' | 'short'
   minProfit: string
   maxProfit: string
-  ticker: string
 }
 
-// Parse timestamp that could be Unix ms or ISO string
-function parseTimestamp(ts: string | number): Date {
-  if (!ts) return new Date(0)
+// ─── Timestamp helpers ───────────────────────────────────────
+// Parse any timestamp format into a Date
+function parseTimestamp(ts: string | number | undefined): Date | null {
+  if (!ts) return null
   const s = String(ts).trim()
-  // Pure digits = Unix milliseconds
+  if (!s) return null
+
+  // Pure digits = Unix milliseconds (or seconds)
   if (/^\d+$/.test(s)) {
     const n = parseInt(s)
-    // If less than 10 billion, it's seconds not ms
-    return new Date(n < 1e10 ? n * 1000 : n)
+    const d = new Date(n < 1e12 ? n * 1000 : n)
+    return isNaN(d.getTime()) ? null : d
   }
-  // Otherwise treat as ISO string
-  return new Date(s)
+
+  // Fix malformed ISO: "2026-02-18T00:30:06.973569+00:00Z" → remove trailing Z when +offset present
+  let fixed = s
+  if (/\+\d{2}:\d{2}Z$/.test(fixed)) {
+    fixed = fixed.slice(0, -1)
+  }
+
+  const d = new Date(fixed)
+  return isNaN(d.getTime()) ? null : d
 }
 
-function formatDate(ts: string | number): string {
-  const d = parseTimestamp(ts)
-  if (isNaN(d.getTime())) return 'N/A'
-  return d.toLocaleString()
+// Format a Date to PST/PDT string
+function toPST(d: Date): string {
+  return d.toLocaleString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  })
 }
 
-function getTimestampMs(ts: string | number): number {
-  const d = parseTimestamp(ts)
-  return isNaN(d.getTime()) ? 0 : d.getTime()
+// Get the best display date for a trade (prefer entry_time from Pine)
+function getTradeDate(trade: Trade): string {
+  // 1st choice: entry_time (Unix ms from Pine Script — the actual trade moment)
+  const d1 = parseTimestamp(trade.entry_time)
+  if (d1) return toPST(d1)
+
+  // 2nd choice: timestamp (inserted_at)
+  const d2 = parseTimestamp(trade.timestamp)
+  if (d2) return toPST(d2)
+
+  return 'N/A'
 }
 
-function safeProfit(val: any): number {
-  if (val === undefined || val === null || val === '') return NaN
-  const n = parseFloat(String(val))
-  return n
+// Get sortable ms value
+function getTradeDateMs(trade: Trade): number {
+  const d = parseTimestamp(trade.entry_time) || parseTimestamp(trade.timestamp)
+  return d ? d.getTime() : 0
+}
+
+// ─── Profit helpers ──────────────────────────────────────────
+// NQ: $20 per point. Compute from prices if stored profit is zero/missing
+function getTradeProfit(trade: Trade): number | null {
+  // If profit field has a real nonzero value, use it
+  const stored = parseFloat(trade.profit)
+  if (!isNaN(stored) && stored !== 0) return stored
+
+  // Calculate from entry/exit prices
+  const entry = parseFloat(trade.entry_price)
+  const exit = parseFloat(trade.exit_price)
+  if (isNaN(entry) || isNaN(exit) || !trade.exit_price) return null
+
+  const action = (trade.action || '').toLowerCase()
+  const pointValue = 20 // NQ futures: $20 per point
+  const qty = parseInt(trade.quantity) || 1
+
+  if (action === 'long' || action === 'buy') {
+    return (exit - entry) * pointValue * qty
+  } else if (action === 'short' || action === 'sell') {
+    return (entry - exit) * pointValue * qty
+  }
+
+  return null
 }
 
 export default function TradesList({ account, refreshTrigger }: TradesListProps) {
@@ -80,7 +134,6 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
     action: 'all',
     minProfit: '',
     maxProfit: '',
-    ticker: ''
   })
 
   useEffect(() => {
@@ -127,7 +180,6 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
         ...dateRange
       }
 
-      // Add filters
       if (filters.action !== 'all') {
         queryArgs.action = filters.action.toUpperCase()
       }
@@ -173,7 +225,6 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
       action: 'all',
       minProfit: '',
       maxProfit: '',
-      ticker: ''
     })
   }
 
@@ -210,42 +261,33 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
     }
   }
 
+  // ─── Filter & sort ─────────────────────────────────────────
   const filteredTrades = trades.filter(trade => {
-    const profit = safeProfit(trade.profit)
+    const profit = getTradeProfit(trade)
     
-    // Profit filter
-    if (filters.profitFilter === 'wins' && (isNaN(profit) || profit <= 0)) return false
-    if (filters.profitFilter === 'losses' && (isNaN(profit) || profit >= 0)) return false
-    
-    // Ticker filter
-    if (filters.ticker && trade.ticker && !trade.ticker.toLowerCase().includes(filters.ticker.toLowerCase())) {
-      return false
-    }
+    if (filters.profitFilter === 'wins' && (profit === null || profit <= 0)) return false
+    if (filters.profitFilter === 'losses' && (profit === null || profit >= 0)) return false
     
     return true
   })
 
   const sortedTrades = [...filteredTrades].sort((a, b) => {
     if (sortBy === 'date') {
-      const comparison = getTimestampMs(a.timestamp) - getTimestampMs(b.timestamp)
+      const comparison = getTradeDateMs(a) - getTradeDateMs(b)
       return sortOrder === 'asc' ? comparison : -comparison
     } else {
-      const aProfit = safeProfit(a.profit)
-      const bProfit = safeProfit(b.profit)
-      // Put NaN profits at the end
-      if (isNaN(aProfit) && isNaN(bProfit)) return 0
-      if (isNaN(aProfit)) return 1
-      if (isNaN(bProfit)) return -1
-      const comparison = aProfit - bProfit
+      const aP = getTradeProfit(a) ?? -Infinity
+      const bP = getTradeProfit(b) ?? -Infinity
+      const comparison = aP - bP
       return sortOrder === 'asc' ? comparison : -comparison
     }
   })
 
-  // Calculate stats (only from trades that have profit)
-  const tradesWithProfit = filteredTrades.filter(t => !isNaN(safeProfit(t.profit)))
-  const totalProfit = tradesWithProfit.reduce((sum, t) => sum + safeProfit(t.profit), 0)
-  const winningTrades = tradesWithProfit.filter(t => safeProfit(t.profit) > 0).length
-  const losingTrades = tradesWithProfit.filter(t => safeProfit(t.profit) < 0).length
+  // Stats — only from trades with computable profit
+  const tradesWithProfit = filteredTrades.filter(t => getTradeProfit(t) !== null)
+  const totalProfit = tradesWithProfit.reduce((sum, t) => sum + (getTradeProfit(t) || 0), 0)
+  const winningTrades = tradesWithProfit.filter(t => (getTradeProfit(t) || 0) > 0).length
+  const losingTrades = tradesWithProfit.filter(t => (getTradeProfit(t) || 0) < 0).length
   const winRate = tradesWithProfit.length > 0 ? (winningTrades / tradesWithProfit.length * 100) : 0
 
   if (loading) {
@@ -314,7 +356,6 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
         {/* Advanced Filters Panel */}
         {showFilters && (
           <div className="bg-gray-700/30 rounded-lg p-4 mb-4 space-y-4">
-            {/* Date Range */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
                 <Calendar className="inline h-4 w-4 mr-1" />
@@ -355,7 +396,6 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              {/* Action Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Action</label>
                 <select
@@ -364,14 +404,11 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
                   className="w-full bg-gray-700 text-white px-3 py-2 rounded"
                 >
                   <option value="all">All</option>
-                  <option value="buy">Buy Only</option>
-                  <option value="sell">Sell Only</option>
                   <option value="long">Long Only</option>
                   <option value="short">Short Only</option>
                 </select>
               </div>
 
-              {/* Profit Filter */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Result</label>
                 <select
@@ -387,7 +424,6 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              {/* Min Profit */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
                   <DollarSign className="inline h-4 w-4 mr-1" />
@@ -402,7 +438,6 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
                 />
               </div>
 
-              {/* Max Profit */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
                   <DollarSign className="inline h-4 w-4 mr-1" />
@@ -418,22 +453,6 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
               </div>
             </div>
 
-            {/* Ticker Search */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                <TrendingUp className="inline h-4 w-4 mr-1" />
-                Search Ticker
-              </label>
-              <input
-                type="text"
-                value={filters.ticker}
-                onChange={(e) => setFilters({ ...filters, ticker: e.target.value })}
-                placeholder="e.g., NQH2026"
-                className="w-full bg-gray-700 text-white px-3 py-2 rounded"
-              />
-            </div>
-
-            {/* Action Buttons */}
             <div className="flex gap-2 pt-2">
               <button
                 onClick={handleApplyFilters}
@@ -475,72 +494,78 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
         <table className="w-full">
           <thead className="bg-gray-700/50">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                Date
+              <th className="px-5 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                Date (PST)
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+              <th className="px-5 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                 Action
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+              <th className="px-5 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                 Status
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+              <th className="px-5 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                 Entry
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+              <th className="px-5 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                 Exit
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
-                Qty
+              <th className="px-5 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                Reason
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+              <th className="px-5 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                 Profit
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-700">
             {sortedTrades.map((trade) => {
-              const profit = safeProfit(trade.profit)
-              const hasProfit = !isNaN(profit)
+              const profit = getTradeProfit(trade)
+              const hasProfit = profit !== null
               const action = (trade.action || '').toUpperCase()
               const status = trade.status || trade.signal_type || ''
+              const reason = trade.exit_reason || ''
               
               return (
                 <tr key={trade.trade_id} className="hover:bg-gray-700/30">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                    {formatDate(trade.timestamp)}
+                  <td className="px-5 py-4 whitespace-nowrap text-sm text-gray-300">
+                    {getTradeDate(trade)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="px-5 py-4 whitespace-nowrap">
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      action === 'BUY' || action === 'LONG'
-                        ? 'bg-blue-600 text-white'
-                        : action === 'SELL' || action === 'SHORT'
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-gray-600 text-white'
+                      action === 'LONG' ? 'bg-blue-600 text-white' :
+                      action === 'SHORT' ? 'bg-purple-600 text-white' :
+                      'bg-gray-600 text-white'
                     }`}>
                       {action || '—'}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="px-5 py-4 whitespace-nowrap">
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      status === 'closed' ? 'bg-green-600/20 text-green-400' :
-                      status === 'entry' ? 'bg-yellow-600/20 text-yellow-400' :
-                      status === 'exit' ? 'bg-blue-600/20 text-blue-400' :
+                      status === 'closed' || status === 'complete' ? 'bg-green-600/20 text-green-400' :
+                      status === 'entry' || status === 'open' ? 'bg-yellow-600/20 text-yellow-400' :
                       'bg-gray-600/20 text-gray-400'
                     }`}>
                       {status || '—'}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                  <td className="px-5 py-4 whitespace-nowrap text-sm text-gray-300">
                     {trade.entry_price ? `$${parseFloat(trade.entry_price).toFixed(2)}` : '—'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                  <td className="px-5 py-4 whitespace-nowrap text-sm text-gray-300">
                     {trade.exit_price ? `$${parseFloat(trade.exit_price).toFixed(2)}` : '—'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                    {trade.quantity || '1'}
+                  <td className="px-5 py-4 whitespace-nowrap">
+                    {reason && (
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        reason === 'TP' ? 'bg-green-600/20 text-green-400' :
+                        reason === 'SL' ? 'bg-red-600/20 text-red-400' :
+                        'bg-gray-600/20 text-gray-400'
+                      }`}>
+                        {reason}
+                      </span>
+                    )}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                  <td className="px-5 py-4 whitespace-nowrap text-sm font-medium">
                     {hasProfit ? (
                       <span className={profit >= 0 ? 'text-profit' : 'text-loss'}>
                         ${profit.toFixed(2)}
@@ -560,10 +585,11 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
       <div className="p-4 border-t border-gray-700 text-sm text-gray-400">
         Showing {sortedTrades.length} of {trades.length} trades
         {tradesWithProfit.length < filteredTrades.length && (
-          <span className="ml-2">
-            ({filteredTrades.length - tradesWithProfit.length} pending exit)
+          <span className="ml-2 text-yellow-400">
+            • {filteredTrades.length - tradesWithProfit.length} pending exit
           </span>
         )}
+        <span className="float-right text-gray-500">All times in Pacific</span>
       </div>
     </div>
   )
