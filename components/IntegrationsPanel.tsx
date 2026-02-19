@@ -117,7 +117,7 @@ export default function IntegrationsPanel({ account, refreshTrigger }: Integrati
       datePreset: 'all',
       customStartDate: '',
       customEndDate: '',
-      dataScope: 'with_indicators',
+      dataScope: 'all_trades',
       includeIndicators: true,
       filename: 'nq_backtest_data',
     },
