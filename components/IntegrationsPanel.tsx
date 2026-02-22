@@ -95,6 +95,42 @@ const DATA_SCOPES: { value: DataScope; label: string; description: string }[] = 
   { value: 'with_indicators', label: 'With Indicators', description: 'Only trades with full indicator data' },
 ]
 
+// Helper to extract s3_key from various response shapes
+const extractS3Key = (data: any): string | null => {
+  // Shape 1: { result: { s3_key: "..." } }
+  if (data?.result?.s3_key) return data.result.s3_key
+  // Shape 2: { s3_key: "..." } (direct)
+  if (data?.s3_key) return data.s3_key
+  // Shape 3: { body: { result: { s3_key: "..." } } } (double-wrapped)
+  if (data?.body?.result?.s3_key) return data.body.result.s3_key
+  if (data?.body?.s3_key) return data.body.s3_key
+  // Shape 4: body is a JSON string
+  if (typeof data?.body === 'string') {
+    try {
+      const parsed = JSON.parse(data.body)
+      if (parsed?.result?.s3_key) return parsed.result.s3_key
+      if (parsed?.s3_key) return parsed.s3_key
+    } catch {}
+  }
+  return null
+}
+
+// Helper to extract a field from various response shapes
+const extractField = (data: any, field: string): any => {
+  if (data?.result?.[field] !== undefined) return data.result[field]
+  if (data?.[field] !== undefined) return data[field]
+  if (data?.body?.result?.[field] !== undefined) return data.body.result[field]
+  if (data?.body?.[field] !== undefined) return data.body[field]
+  if (typeof data?.body === 'string') {
+    try {
+      const parsed = JSON.parse(data.body)
+      if (parsed?.result?.[field] !== undefined) return parsed.result[field]
+      if (parsed?.[field] !== undefined) return parsed[field]
+    } catch {}
+  }
+  return undefined
+}
+
 export default function IntegrationsPanel({ account, refreshTrigger }: IntegrationsPanelProps) {
   const [expandedPlatform, setExpandedPlatform] = useState<Platform | null>(null)
   const [exportJobs, setExportJobs] = useState<ExportJob[]>([])
@@ -248,10 +284,15 @@ export default function IntegrationsPanel({ account, refreshTrigger }: Integrati
       })
 
       const exportData = await exportResponse.json()
+      console.log('[Integrations] export_csv response:', JSON.stringify(exportData))
 
-      if (!exportData.result?.s3_key) {
-        throw new Error('Export to S3 failed')
+      const s3Key = extractS3Key(exportData)
+      if (!s3Key) {
+        console.error('[Integrations] Could not find s3_key in response:', exportData)
+        throw new Error(`Export to S3 failed — unexpected response format`)
       }
+
+      console.log('[Integrations] Got s3_key:', s3Key)
 
       // Step 2: Platform-specific upload
       if (platform === 'google_drive') {
@@ -261,13 +302,16 @@ export default function IntegrationsPanel({ account, refreshTrigger }: Integrati
           body: JSON.stringify({
             tool: 'upload_to_drive',
             arguments: {
-              s3_key: exportData.result.s3_key,
+              s3_key: s3Key,
               filename: `${config.filename}.${config.format}`,
               folder: 'Trading Analytics',
             },
           }),
         })
         const uploadData = await uploadResponse.json()
+        console.log('[Integrations] upload_to_drive response:', JSON.stringify(uploadData))
+
+        const driveUrl = extractField(uploadData, 'drive_url')
 
         setExportJobs(prev =>
           prev.map(j =>
@@ -276,7 +320,7 @@ export default function IntegrationsPanel({ account, refreshTrigger }: Integrati
                   ...j,
                   status: 'success',
                   message: `Uploaded to Google Drive: Trading Analytics/${config.filename}.${config.format}`,
-                  downloadUrl: uploadData.result?.drive_url,
+                  downloadUrl: driveUrl,
                 }
               : j
           )
@@ -288,13 +332,16 @@ export default function IntegrationsPanel({ account, refreshTrigger }: Integrati
           body: JSON.stringify({
             tool: 'sync_to_qc',
             arguments: {
-              s3_key: exportData.result.s3_key,
+              s3_key: s3Key,
               dataset_name: config.filename,
               format: config.format,
             },
           }),
         })
         const syncData = await syncResponse.json()
+        console.log('[Integrations] sync_to_qc response:', JSON.stringify(syncData))
+
+        const qcUrl = extractField(syncData, 'qc_url')
 
         setExportJobs(prev =>
           prev.map(j =>
@@ -303,7 +350,7 @@ export default function IntegrationsPanel({ account, refreshTrigger }: Integrati
                   ...j,
                   status: 'success',
                   message: `Synced to QuantConnect: ${config.filename}`,
-                  downloadUrl: syncData.result?.qc_url,
+                  downloadUrl: qcUrl,
                 }
               : j
           )
@@ -315,13 +362,16 @@ export default function IntegrationsPanel({ account, refreshTrigger }: Integrati
           body: JSON.stringify({
             tool: 'upload_to_kaggle',
             arguments: {
-              s3_key: exportData.result.s3_key,
+              s3_key: s3Key,
               dataset_name: config.filename,
               description: `NQ Futures trading dataset - ${config.dataScope} - exported ${new Date().toLocaleDateString()}`,
             },
           }),
         })
         const kaggleData = await kaggleResponse.json()
+        console.log('[Integrations] upload_to_kaggle response:', JSON.stringify(kaggleData))
+
+        const kaggleUrl = extractField(kaggleData, 'kaggle_url')
 
         setExportJobs(prev =>
           prev.map(j =>
@@ -330,7 +380,7 @@ export default function IntegrationsPanel({ account, refreshTrigger }: Integrati
                   ...j,
                   status: 'success',
                   message: `Published to Kaggle: ${config.filename}`,
-                  downloadUrl: kaggleData.result?.kaggle_url,
+                  downloadUrl: kaggleUrl,
                 }
               : j
           )
@@ -338,24 +388,31 @@ export default function IntegrationsPanel({ account, refreshTrigger }: Integrati
       }
 
       // Also get a direct download link
-      const urlResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tool: 'get_export_url',
-          arguments: { s3_key: exportData.result.s3_key },
-        }),
-      })
-      const urlData = await urlResponse.json()
+      try {
+        const urlResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tool: 'get_export_url',
+            arguments: { s3_key: s3Key },
+          }),
+        })
+        const urlData = await urlResponse.json()
+        const downloadUrl = extractField(urlData, 'download_url')
 
-      if (urlData.result?.download_url) {
-        setExportJobs(prev =>
-          prev.map(j =>
-            j.id === jobId ? { ...j, downloadUrl: j.downloadUrl || urlData.result.download_url } : j
+        if (downloadUrl) {
+          setExportJobs(prev =>
+            prev.map(j =>
+              j.id === jobId ? { ...j, downloadUrl: j.downloadUrl || downloadUrl } : j
+            )
           )
-        )
+        }
+      } catch (urlError) {
+        // Non-critical — don't fail the whole export if we can't get the download URL
+        console.warn('[Integrations] Could not get download URL:', urlError)
       }
     } catch (error: any) {
+      console.error('[Integrations] Export failed:', error)
       setExportJobs(prev =>
         prev.map(j =>
           j.id === jobId
