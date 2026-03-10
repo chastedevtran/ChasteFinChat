@@ -40,20 +40,17 @@ interface Filters {
 }
 
 // ─── Timestamp helpers ───────────────────────────────────────
-// Parse any timestamp format into a Date
 function parseTimestamp(ts: string | number | undefined): Date | null {
   if (!ts) return null
   const s = String(ts).trim()
   if (!s) return null
 
-  // Pure digits = Unix milliseconds (or seconds)
   if (/^\d+$/.test(s)) {
     const n = parseInt(s)
     const d = new Date(n < 1e12 ? n * 1000 : n)
     return isNaN(d.getTime()) ? null : d
   }
 
-  // Fix malformed ISO: "2026-02-18T00:30:06.973569+00:00Z" → remove trailing Z when +offset present
   let fixed = s
   if (/\+\d{2}:\d{2}Z$/.test(fixed)) {
     fixed = fixed.slice(0, -1)
@@ -63,7 +60,6 @@ function parseTimestamp(ts: string | number | undefined): Date | null {
   return isNaN(d.getTime()) ? null : d
 }
 
-// Format a Date to PST/PDT string
 function toPST(d: Date): string {
   return d.toLocaleString('en-US', {
     timeZone: 'America/Los_Angeles',
@@ -75,39 +71,32 @@ function toPST(d: Date): string {
   })
 }
 
-// Get the best display date for a trade (prefer entry_time from Pine)
 function getTradeDate(trade: Trade): string {
-  // 1st choice: entry_time (Unix ms from Pine Script — the actual trade moment)
   const d1 = parseTimestamp(trade.entry_time)
   if (d1) return toPST(d1)
 
-  // 2nd choice: timestamp (inserted_at)
   const d2 = parseTimestamp(trade.timestamp)
   if (d2) return toPST(d2)
 
   return 'N/A'
 }
 
-// Get sortable ms value
 function getTradeDateMs(trade: Trade): number {
   const d = parseTimestamp(trade.entry_time) || parseTimestamp(trade.timestamp)
   return d ? d.getTime() : 0
 }
 
 // ─── Profit helpers ──────────────────────────────────────────
-// NQ: $20 per point. Compute from prices if stored profit is zero/missing
 function getTradeProfit(trade: Trade): number | null {
-  // If profit field has a real nonzero value, use it
   const stored = parseFloat(trade.profit)
   if (!isNaN(stored) && stored !== 0) return stored
 
-  // Calculate from entry/exit prices
   const entry = parseFloat(trade.entry_price)
   const exit = parseFloat(trade.exit_price)
   if (isNaN(entry) || isNaN(exit) || !trade.exit_price) return null
 
   const action = (trade.action || '').toLowerCase()
-  const pointValue = 20 // NQ futures: $20 per point
+  const pointValue = 20
   const qty = parseInt(trade.quantity) || 1
 
   if (action === 'long' || action === 'buy') {
@@ -283,7 +272,6 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
     }
   })
 
-  // Stats — only from trades with computable profit
   const tradesWithProfit = filteredTrades.filter(t => getTradeProfit(t) !== null)
   const totalProfit = tradesWithProfit.reduce((sum, t) => sum + (getTradeProfit(t) || 0), 0)
   const winningTrades = tradesWithProfit.filter(t => (getTradeProfit(t) || 0) > 0).length
@@ -498,6 +486,9 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
                 Date (PST)
               </th>
               <th className="px-5 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                Symbol
+              </th>
+              <th className="px-5 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
                 Action
               </th>
               <th className="px-5 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
@@ -524,11 +515,17 @@ export default function TradesList({ account, refreshTrigger }: TradesListProps)
               const action = (trade.action || '').toUpperCase()
               const status = trade.status || trade.signal_type || ''
               const reason = trade.exit_reason || ''
-              
+              const symbol = trade.symbol || trade.ticker || '—'
+
               return (
                 <tr key={trade.trade_id} className="hover:bg-gray-700/30">
                   <td className="px-5 py-4 whitespace-nowrap text-sm text-gray-300">
                     {getTradeDate(trade)}
+                  </td>
+                  <td className="px-5 py-4 whitespace-nowrap">
+                    <span className="font-mono text-sm font-medium text-blue-300">
+                      {symbol}
+                    </span>
                   </td>
                   <td className="px-5 py-4 whitespace-nowrap">
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
