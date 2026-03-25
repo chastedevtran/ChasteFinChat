@@ -9,9 +9,11 @@ import MetricsPanel from '@/components/MetricsPanel'
 import TradesList from '@/components/TradesList'
 import IntegrationsPanel from '@/components/IntegrationsPanel'
 import QuickActions from '@/components/QuickActions'
-import { BarChart3, MessageSquare, Upload, TrendingUp, Link2, ChevronDown } from 'lucide-react'
+import ManifestViewer from '@/components/ManifestViewer'
+import S3Browser from '@/components/S3Browser'
+import { BarChart3, MessageSquare, Upload, TrendingUp, Link2, ChevronDown, GitBranch, Database } from 'lucide-react'
 
-type Tab = 'chat' | 'charts' | 'upload' | 'trades' | 'integrations'
+type Tab = 'chat' | 'charts' | 'upload' | 'trades' | 'integrations' | 'pipeline' | 's3'
 
 interface AccountInfo {
   account: string
@@ -32,7 +34,6 @@ export default function Dashboard() {
 
   const triggerRefresh = () => setRefreshTrigger(prev => prev + 1)
 
-  // Fetch accounts on mount
   useEffect(() => {
     fetchAccounts()
   }, [])
@@ -43,19 +44,12 @@ export default function Dashboard() {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tool: 'list_accounts',
-          arguments: {}
-        })
+        body: JSON.stringify({ tool: 'list_accounts', arguments: {} })
       })
-
       const data = await response.json()
       const result = data.result || data
       const accts = result.accounts || []
-
       setAccounts(accts)
-
-      // Default to the most recently active account
       if (accts.length > 0 && !account) {
         setAccount(accts[0].account)
       }
@@ -86,6 +80,8 @@ export default function Dashboard() {
     { id: 'chat' as Tab, name: 'AI Chat', icon: MessageSquare },
     { id: 'charts' as Tab, name: 'Analytics', icon: TrendingUp },
     { id: 'trades' as Tab, name: 'Trades', icon: BarChart3 },
+    { id: 'pipeline' as Tab, name: 'Pipeline', icon: GitBranch },
+    { id: 's3' as Tab, name: 'S3 Browser', icon: Database },
     { id: 'integrations' as Tab, name: 'Integrations', icon: Link2 },
     { id: 'upload' as Tab, name: 'Upload', icon: Upload },
   ]
@@ -121,7 +117,6 @@ export default function Dashboard() {
                   )}
                 </button>
 
-                {/* Dropdown */}
                 {showAccountDropdown && accounts.length > 0 && (
                   <div className="absolute top-full left-0 mt-1 w-96 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-50 overflow-hidden">
                     {accounts.map((acct) => (
@@ -162,18 +157,14 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* Click outside to close dropdown */}
       {showAccountDropdown && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => setShowAccountDropdown(false)}
-        />
+        <div className="fixed inset-0 z-40" onClick={() => setShowAccountDropdown(false)} />
       )}
 
       {/* Tab Navigation */}
       <div className="bg-gray-800/30 backdrop-blur-sm border-b border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex space-x-8" aria-label="Tabs">
+          <nav className="flex space-x-6 overflow-x-auto" aria-label="Tabs">
             {tabs.map((tab) => {
               const Icon = tab.icon
               return (
@@ -181,15 +172,14 @@ export default function Dashboard() {
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={`
-                    flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors
-                    ${
-                      activeTab === tab.id
-                        ? 'border-blue-500 text-blue-400'
-                        : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'
+                    flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap
+                    ${activeTab === tab.id
+                      ? 'border-blue-500 text-blue-400'
+                      : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'
                     }
                   `}
                 >
-                  <Icon className="h-5 w-5" />
+                  <Icon className="h-4 w-4" />
                   {tab.name}
                 </button>
               )
@@ -236,6 +226,14 @@ export default function Dashboard() {
 
             {activeTab === 'trades' && (
               <TradesList account={account} refreshTrigger={refreshTrigger} />
+            )}
+
+            {activeTab === 'pipeline' && (
+              <ManifestViewer />
+            )}
+
+            {activeTab === 's3' && (
+              <S3Browser />
             )}
 
             {activeTab === 'integrations' && (
