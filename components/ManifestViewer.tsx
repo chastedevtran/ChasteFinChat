@@ -1,9 +1,28 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { RefreshCw, ChevronDown, ChevronRight, CheckCircle, XCircle, Clock, Download } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronRight, CheckCircle, XCircle, Clock, Download, Copy, Check } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <button
+      onClick={copy}
+      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-gray-600 text-gray-400 hover:border-gray-500 transition-colors"
+      title="Copy to clipboard"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? 'Copied!' : 'Copy'}
+    </button>
+  )
+}
 
 interface Run {
   run_id: string
@@ -251,6 +270,9 @@ export default function ManifestViewer() {
                 >
                   {rawView ? 'Structured' : 'Raw JSON'}
                 </button>
+                {rawView && (
+                  <CopyButton text={JSON.stringify(manifest, null, 2)} />
+                )}
                 <button
                   onClick={downloadManifest}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-gray-600 text-gray-400 hover:border-gray-500 transition-colors"

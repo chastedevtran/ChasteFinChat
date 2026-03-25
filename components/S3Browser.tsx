@@ -1,10 +1,29 @@
 'use client'
 
 import { useState } from 'react'
-import { Folder, FileText, RefreshCw, ChevronRight, Download, ArrowLeft, Search } from 'lucide-react'
+import { Folder, FileText, RefreshCw, ChevronRight, Download, ArrowLeft, Search, Copy, Check } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
 const BUCKET = 'trading-data-exports'
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <button
+      onClick={copy}
+      className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-600 text-gray-400 hover:border-gray-500 transition-colors"
+      title="Copy to clipboard"
+    >
+      {copied ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
+      {copied ? 'Copied!' : 'Copy'}
+    </button>
+  )
+}
 
 interface S3Object {
   s3_key: string
@@ -330,12 +349,15 @@ export default function S3Browser() {
               <span className="text-xs font-mono text-gray-300 truncate">
                 {previewContent.key.split('/').pop()}
               </span>
-              <button
-                onClick={() => setPreviewContent(null)}
-                className="text-gray-500 hover:text-gray-300 text-xs ml-2"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-2 ml-2 shrink-0">
+                <CopyButton text={previewContent.content} />
+                <button
+                  onClick={() => setPreviewContent(null)}
+                  className="text-gray-500 hover:text-gray-300 text-xs"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
             <pre className="flex-1 overflow-auto p-3 text-xs font-mono text-gray-300 whitespace-pre-wrap bg-gray-900/30">
               {previewContent.key.endsWith('.json')
